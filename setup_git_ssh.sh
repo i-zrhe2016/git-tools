@@ -8,7 +8,7 @@ Usage:
 
 Options:
   --email EMAIL         Email/comment written into the SSH public key.
-  --key-path PATH       Private key path. Default: auto-detect existing key, otherwise ~/.ssh/<host>_ed25519
+  --key-path PATH       Private key path. Default: ./key in the current directory
   --host HOST           Git server hostname. Default: github.com
   --host-alias ALIAS    SSH host alias written into ~/.ssh/config. Default: same as --host
   --user USER           SSH username. Default: $GIT_SSH_USER or git
@@ -19,7 +19,7 @@ Options:
 
 Examples:
   ./setup_git_ssh.sh --host github.com --email you@example.com
-  ./setup_git_ssh.sh --host gitlab.com --key-path ~/.ssh/key
+  ./setup_git_ssh.sh --host gitlab.com --key-path ./key
 EOF
 }
 
@@ -31,32 +31,8 @@ SSH_USER="${GIT_SSH_USER:-git}"
 CONFIGURE_REPO=1
 REQUIRE_EXISTING_KEY=0
 
-sanitize_name() {
-  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
-}
-
 resolve_default_key_path() {
-  if [[ -n "${GIT_SSH_KEY_PATH:-}" ]]; then
-    printf '%s\n' "${GIT_SSH_KEY_PATH}"
-    return 0
-  fi
-
-  local sanitized_host fallback candidate
-  sanitized_host="$(sanitize_name "${HOST_ALIAS:-${HOST_NAME}}")"
-  fallback="${HOME}/.ssh/${sanitized_host}_ed25519"
-  local candidates=(
-    "${HOME}/.ssh/key"
-    "${HOME}/.ssh/id_ed25519"
-    "${HOME}/.ssh/id_rsa"
-    "${fallback}"
-  )
-  for candidate in "${candidates[@]}"; do
-    if [[ -f "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-  printf '%s\n' "${fallback}"
+  printf '%s\n' "$(pwd)/key"
 }
 
 build_ssh_command() {

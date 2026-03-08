@@ -13,14 +13,14 @@ Options:
   --remote-url URL      Explicit remote URL to use
   --host HOST           Git server hostname. Default: derived from remote, otherwise github.com
   --user USER           SSH username. Default: $GIT_SSH_USER or git
-  --key-path PATH       SSH private key path. Default: auto-detect existing key
+  --key-path PATH       SSH private key path. Default: ./key in the current directory
   --allow-dirty         Push even if the working tree is dirty
   -h, --help            Show this help message.
 
 Examples:
   ./push_git.sh
   ./push_git.sh --host gitlab.com --repo group/project
-  ./push_git.sh --remote-url git@example.com:team/repo.git --key-path ~/.ssh/key
+  ./push_git.sh --remote-url git@example.com:team/repo.git --key-path ./key
 EOF
 }
 
@@ -34,27 +34,7 @@ KEY_PATH=""
 ALLOW_DIRTY=0
 
 resolve_default_key_path() {
-  if [[ -n "${GIT_SSH_KEY_PATH:-}" ]]; then
-    printf '%s\n' "${GIT_SSH_KEY_PATH}"
-    return 0
-  fi
-
-  local host_hint candidate
-  host_hint="$(printf '%s' "${HOST_NAME:-git}" | tr -c 'A-Za-z0-9._-' '_')"
-  local candidates=(
-    "${HOME}/.ssh/key"
-    "${HOME}/.ssh/id_ed25519"
-    "${HOME}/.ssh/id_rsa"
-    "${HOME}/.ssh/${host_hint}_ed25519"
-    "${HOME}/.ssh/github_ed25519"
-  )
-  for candidate in "${candidates[@]}"; do
-    if [[ -f "${candidate}" ]]; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
-  done
-  return 1
+  printf '%s\n' "$(pwd)/key"
 }
 
 build_ssh_command() {

@@ -1,15 +1,17 @@
 # git-tools
 
-独立于 `do-control-panel` 的 Git SSH 辅助脚本，现已补成一个可通过 `docker compose` 启动的 API 服务。
+一个 Git SSH 辅助工具，现已补成一个可通过 `docker compose` 启动的 API 服务。
 
 这个版本不生成密钥，使用你提供的私钥，并写入单独的 key 文件保存。
 
 ## 直接用脚本
 
 ```bash
-./setup_git_ssh.sh --host github.com --key-path ~/.ssh/key --require-existing-key
-./push_git.sh --host github.com --repo i-zrhe2016/do-control-panel --key-path ~/.ssh/key
+./setup_git_ssh.sh --host github.com --key-path ./key --require-existing-key
+./push_git.sh --host github.com --repo owner/repo --key-path ./key
 ```
+
+不显式传 `--key-path` 时，两个脚本都会只读取当前目录下的 `./key`，不会再自动回退到 `~/.ssh/`。
 
 ## 启动 API
 
