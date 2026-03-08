@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+key
+.env
+.venv/
+
+data/*
+!data/.gitkeep
+!data/keys/
+data/keys/*
+!data/keys/.gitkeep
+
+workspace/*
+!workspace/.gitkeep
