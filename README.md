@@ -1,17 +1,8 @@
 # git-tools
 
-一个 Git SSH 辅助工具，现已补成一个可通过 `docker compose` 启动的 API 服务。
+一个通过 API 执行 Git SSH 推送的服务。
 
-这个版本不生成密钥，使用你提供的私钥，并写入单独的 key 文件保存。
-
-## 直接用脚本
-
-```bash
-./setup_git_ssh.sh --host github.com --key-path ./key --require-existing-key
-./push_git.sh --host github.com --repo owner/repo --key-path ./key
-```
-
-不显式传 `--key-path` 时，两个脚本都会只读取当前目录下的 `./key`，不会再自动回退到 `~/.ssh/`。
+推荐用法是把私钥和仓库内容都传给 API，由容器内部完成暂存、提交和推送；不需要把待推送仓库挂载到宿主机目录再进入容器执行。
 
 ## 启动 API
 
@@ -19,10 +10,7 @@
 docker compose up --build -d
 ```
 
-服务默认监听 `8000`，并挂载两个目录：
-
-- `./data`：持久化 SSH 配置和私钥文件
-- `./workspace`：放需要执行 `git push` 的仓库
+服务默认监听 `8000`。
 
 如果宿主机 `8000` 已被占用，可以改端口：
 
@@ -63,7 +51,7 @@ docker compose up --build -d
 
 ### 1. 导入你的私钥到 key 文件
 
-如果你没有在容器启动时通过环境变量注入私钥，也可以在服务启动后调用 API：
+如果你不想在容器启动时注入私钥，也可以先调用 API 保存私钥：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/keys/import \
@@ -76,11 +64,51 @@ curl -X POST http://127.0.0.1:8000/keys/import \
   }'
 ```
 
-这会把私钥写入 `data/keys/default.key`，并自动生成对应的 `.pub` 文件，不会生成新的私钥。
+这会把私钥写入 `data/keys/default.key`，并自动生成对应的 `.pub` 文件。
 
-### 2. 执行 git push
+### 2. 直接把内容传给 API 并推送
 
-先把目标仓库挂到 `./workspace`，例如容器内路径为 `/workspace/my-repo`，然后调用：
+`/git/push` 现在支持直接接收文件内容。服务会在容器内创建临时仓库，拉取远端分支（如果存在），覆盖写入你传入的文件，提交后再推送。
+
+```bash
+curl -X POST http://127.0.0.1:8000/git/push \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "key_name": "default",
+    "host": "github.com",
+    "repo": "owner/repo",
+    "branch": "main",
+    "commit_message": "Update via API",
+    "files": [
+      {
+        "path": "README.md",
+        "content": "# hello\n"
+      },
+      {
+        "path": "scripts/deploy.sh",
+        "content": "#!/usr/bin/env bash\necho ok\n",
+        "executable": true
+      }
+    ]
+  }'
+```
+
+常用参数：
+
+- `repo`：目标仓库路径，例如 `owner/repo`
+- `remote_url`：直接指定完整 remote 地址；传了它就不需要 `repo`
+- `branch`：目标分支；不传时默认 `main`
+- `commit_message`：提交信息
+- `author_name` / `author_email`：覆盖默认提交作者
+- `delete_missing`：默认 `true`，表示这次请求里的文件集合会覆盖远端分支工作区
+- `force_push`：使用 `--force-with-lease`
+- `content_b64`：二进制文件或不方便直接传文本时可用
+
+如果你想一次请求里同时带私钥，也可以直接在 `/git/push` 的请求体中加入 `private_key`。服务会先把私钥写到 `data/keys/<key_name>.key`，再执行推送。
+
+### 3. 兼容旧模式：推送已存在仓库
+
+如果你仍然想推送一个已经存在于容器工作目录内的仓库，`/git/push` 仍然支持 `repo_dir` 模式：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/git/push \
@@ -93,14 +121,7 @@ curl -X POST http://127.0.0.1:8000/git/push \
   }'
 ```
 
-可选参数：
-
-- `branch`：指定分支，不传则取当前分支
-- `remote`：默认 `origin`
-- `remote_url`：直接指定完整 remote 地址
-- `allow_dirty`：允许工作区有未提交改动时继续推送
-
-如果你想一步完成，也可以在 `git push` 请求里直接带 `private_key`，服务会先保存到 `data/keys/<key_name>.key`，再执行推送；这种用法需要同时传 `host`。
+这个模式下需要传 `repo_dir`，且不能和 `files` 同时出现。
 
 ## 健康检查
 
@@ -110,5 +131,6 @@ curl http://127.0.0.1:8000/health
 
 ## 注意
 
-- `keys/import` 用于保存你提供的现有私钥，不会自动生成新密钥。
-- 不建议把真实私钥提交到代码仓库，私钥只会写到挂载目录 `data/keys/`。
+- 推荐通过 API 传文件内容，不要把真实私钥提交到代码仓库。
+- `keys/import` 只保存你提供的现有私钥，不会生成新的私钥。
+- 私钥只会写到挂载目录 `data/keys/`。
