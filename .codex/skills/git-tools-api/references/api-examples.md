@@ -4,8 +4,10 @@
 
 如果用户已经有可用私钥，优先用环境变量在容器启动时导入：
 
+约定本地私钥路径为 `git-tools-api/key`，只用于本地导入，不要提交到仓库。
+
 ```bash
-export GIT_API_INIT_PRIVATE_KEY_B64="$(base64 < key | tr -d '\n')"
+export GIT_API_INIT_PRIVATE_KEY_B64="$(base64 < git-tools-api/key | tr -d '\n')"
 export GIT_API_INIT_HOST=github.com
 export GIT_API_INIT_USER=git
 docker compose up --build -d
@@ -26,14 +28,22 @@ curl http://127.0.0.1:8000/health
 ## 导入私钥
 
 ```bash
+PRIVATE_KEY_JSON="$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+print(json.dumps(Path("git-tools-api/key").read_text(encoding="utf-8")))
+PY
+)"
+
 curl -X POST http://127.0.0.1:8000/keys/import \
   -H 'Content-Type: application/json' \
-  -d '{
-    "key_name": "default",
-    "host": "github.com",
-    "user": "git",
-    "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"
-  }'
+  -d "{
+    \"key_name\": \"default\",
+    \"host\": \"github.com\",
+    \"user\": \"git\",
+    \"private_key\": ${PRIVATE_KEY_JSON}
+  }"
 ```
 
 ## 直接推送文本文件

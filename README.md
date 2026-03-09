@@ -105,7 +105,10 @@ curl -X POST http://127.0.0.1:8000/git/push \
 - `remote_url`：直接指定完整 remote 地址；传了它就不需要 `repo`
 - `branch`：目标分支；不传时默认 `main`
 - `commit_message`：提交信息
-- `author_name` / `author_email`：覆盖默认提交作者
+- 提交作者名固定为 `i-zrhe2016`
+- 提交邮箱固定为 `zrhe2016@gmail.com`
+- `author_name`：即使传入也不会覆盖固定作者名
+- `author_email`：即使传入也不会覆盖固定提交邮箱
 - `delete_missing`：默认 `true`，表示这次请求里的文件集合会覆盖远端分支工作区
 - `force_push`：使用 `--force-with-lease`
 - `content_b64`：二进制文件或不方便直接传文本时可用

@@ -23,10 +23,8 @@ SSH_DIR = SSH_HOME / ".ssh"
 SSH_KNOWN_HOSTS_PATH = SSH_DIR / "known_hosts"
 STAGING_ROOT = DATA_DIR / "staging"
 DEFAULT_KEY_NAME = os.getenv("GIT_API_DEFAULT_KEY_NAME", "default")
-DEFAULT_AUTHOR_NAME = os.getenv("GIT_API_COMMIT_AUTHOR_NAME", "git-tools api")
-DEFAULT_AUTHOR_EMAIL = os.getenv(
-    "GIT_API_COMMIT_AUTHOR_EMAIL", "git-tools-api@example.invalid"
-)
+FIXED_AUTHOR_NAME = "i-zrhe2016"
+FIXED_AUTHOR_EMAIL = "zrhe2016@gmail.com"
 KEY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 REMOTE_HTTPS_RE = re.compile(r"^https?://([^/]+)/(.+)$")
 REMOTE_SSH_URL_RE = re.compile(r"^ssh://([^@]+)@([^/]+)/(.+)$")
@@ -67,8 +65,14 @@ class PushRequest(BaseModel):
     user: str = Field(default="git")
     private_key: str | None = None
     commit_message: str = Field(default="Update via git-tools API", min_length=1)
-    author_name: str | None = None
-    author_email: str | None = None
+    author_name: str | None = Field(
+        default=None,
+        description="Ignored. Commit author name is always i-zrhe2016.",
+    )
+    author_email: str | None = Field(
+        default=None,
+        description="Ignored. Commit author email is always zrhe2016@gmail.com.",
+    )
     delete_missing: bool = True
     force_push: bool = False
 
@@ -291,12 +295,12 @@ def resolve_branch(request: PushRequest) -> str:
     return request.branch or "main"
 
 
-def resolve_author_name(request: PushRequest) -> str:
-    return (request.author_name or "").strip() or DEFAULT_AUTHOR_NAME
+def resolve_author_name(_: PushRequest) -> str:
+    return FIXED_AUTHOR_NAME
 
 
-def resolve_author_email(request: PushRequest) -> str:
-    return (request.author_email or "").strip() or DEFAULT_AUTHOR_EMAIL
+def resolve_author_email(_: PushRequest) -> str:
+    return FIXED_AUTHOR_EMAIL
 
 
 def build_remote_url(request: PushRequest) -> str:
