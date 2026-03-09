@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Tools API"
+  short_description: "Run and debug the Docker Git push API."
+  default_prompt: "Use $git-tools-api to 启动、调用或排查这个 Docker Git 推送服务。"

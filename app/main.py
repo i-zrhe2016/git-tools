@@ -12,17 +12,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("GIT_API_DATA_DIR", ROOT_DIR / "data")).resolve()
 KEYS_DIR = DATA_DIR / "keys"
 SSH_HOME = Path(os.getenv("GIT_API_HOME", DATA_DIR / "home")).resolve()
-WORKSPACE_ROOT = Path(
-    os.getenv("GIT_API_WORKSPACE_ROOT", ROOT_DIR / "workspace")
-).resolve()
-STAGING_ROOT = WORKSPACE_ROOT / "_api"
+SSH_DIR = SSH_HOME / ".ssh"
+SSH_KNOWN_HOSTS_PATH = SSH_DIR / "known_hosts"
+STAGING_ROOT = DATA_DIR / "staging"
 DEFAULT_KEY_NAME = os.getenv("GIT_API_DEFAULT_KEY_NAME", "default")
 DEFAULT_AUTHOR_NAME = os.getenv("GIT_API_COMMIT_AUTHOR_NAME", "git-tools api")
 DEFAULT_AUTHOR_EMAIL = os.getenv(
@@ -34,10 +33,11 @@ REMOTE_SSH_URL_RE = re.compile(r"^ssh://([^@]+)@([^/]+)/(.+)$")
 REMOTE_SCP_RE = re.compile(r"^([^@]+)@([^:]+):(.+)$")
 
 SETUP_SCRIPT = ROOT_DIR / "setup_git_ssh.sh"
-PUSH_SCRIPT = ROOT_DIR / "push_git.sh"
 
 
 class SaveKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: str | None = None
     key_name: str = Field(default=DEFAULT_KEY_NAME)
     host: str = Field(default="github.com")
@@ -47,6 +47,8 @@ class SaveKeyRequest(BaseModel):
 
 
 class RepoFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     path: str = Field(min_length=1)
     content: str | None = None
     content_b64: str | None = None
@@ -54,16 +56,15 @@ class RepoFile(BaseModel):
 
 
 class PushRequest(BaseModel):
-    repo_dir: str | None = None
-    files: list[RepoFile] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[RepoFile] = Field(min_length=1)
     key_name: str = Field(default=DEFAULT_KEY_NAME)
-    remote: str = Field(default="origin")
     branch: str | None = None
     repo: str | None = None
     remote_url: str | None = None
     host: str | None = None
     user: str = Field(default="git")
-    allow_dirty: bool = False
     private_key: str | None = None
     commit_message: str = Field(default="Update via git-tools API", min_length=1)
     author_name: str | None = None
@@ -85,7 +86,7 @@ class CommandError(RuntimeError):
 async def lifespan(_: FastAPI):
     KEYS_DIR.mkdir(parents=True, exist_ok=True)
     SSH_HOME.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    SSH_DIR.mkdir(parents=True, exist_ok=True)
     STAGING_ROOT.mkdir(parents=True, exist_ok=True)
     bootstrap_key_from_env()
     yield
@@ -97,6 +98,7 @@ app = FastAPI(title="git-tools API", version="1.0.0", lifespan=lifespan)
 def command_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env["HOME"] = str(SSH_HOME)
+    env["GIT_SSH_KNOWN_HOSTS_PATH"] = str(SSH_KNOWN_HOSTS_PATH)
     if extra_env:
         env.update(extra_env)
     return env
@@ -143,23 +145,6 @@ def read_public_key(key_path: Path) -> str:
     return public_key_path.read_text(encoding="utf-8").strip()
 
 
-def resolve_repo_dir(repo_dir: str) -> Path:
-    requested = Path(repo_dir)
-    resolved = requested.resolve() if requested.is_absolute() else (WORKSPACE_ROOT / requested).resolve()
-    try:
-        resolved.relative_to(WORKSPACE_ROOT)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"repo_dir must stay inside workspace root: {WORKSPACE_ROOT}",
-        ) from exc
-    if not resolved.exists():
-        raise HTTPException(status_code=400, detail=f"repo_dir does not exist: {resolved}")
-    if not resolved.is_dir():
-        raise HTTPException(status_code=400, detail=f"repo_dir is not a directory: {resolved}")
-    return resolved
-
-
 def build_setup_command(request: SaveKeyRequest, key_path: Path, require_existing_key: bool = True) -> list[str]:
     command = [
         str(SETUP_SCRIPT),
@@ -181,11 +166,19 @@ def build_setup_command(request: SaveKeyRequest, key_path: Path, require_existin
 
 
 def build_ssh_command(key_path: Path) -> str:
-    command = f"ssh -i {shlex.quote(str(key_path))} -o IdentitiesOnly=yes"
-    known_hosts = os.getenv("GIT_SSH_KNOWN_HOSTS_PATH")
-    if known_hosts:
-        command += f" -o UserKnownHostsFile={shlex.quote(known_hosts)}"
-    return command
+    return " ".join(
+        [
+            "ssh",
+            "-i",
+            shlex.quote(str(key_path)),
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            f"UserKnownHostsFile={shlex.quote(str(SSH_KNOWN_HOSTS_PATH))}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+        ]
+    )
 
 
 def write_private_key(key_path: Path, private_key: str) -> None:
@@ -282,16 +275,6 @@ def parse_remote_url(remote_url: str) -> tuple[str, str, str] | None:
         return scp_match.group(2), scp_match.group(1), scp_match.group(3).removesuffix(".git")
 
     return None
-
-
-def resolve_push_mode(request: PushRequest) -> str:
-    has_repo_dir = bool(request.repo_dir)
-    has_files = request.files is not None
-    if has_repo_dir == has_files:
-        raise HTTPException(status_code=400, detail="provide exactly one of repo_dir or files")
-    if has_files and not request.files:
-        raise HTTPException(status_code=400, detail="files must not be empty")
-    return "repo_dir" if has_repo_dir else "files"
 
 
 def resolve_host(request: PushRequest) -> str:
@@ -474,56 +457,18 @@ def current_commit(repo_dir: Path) -> str | None:
     return completed.stdout.strip()
 
 
-def push_existing_repo(request: PushRequest, key_path: Path) -> dict[str, str]:
-    if request.repo_dir is None:
-        raise HTTPException(status_code=400, detail="repo_dir is required for repository push mode")
-
-    repo_dir = resolve_repo_dir(request.repo_dir)
-    command = [
-        str(PUSH_SCRIPT),
-        "--remote",
-        request.remote,
-        "--user",
-        request.user,
-        "--key-path",
-        str(key_path),
-    ]
-
-    if request.branch:
-        command.extend(["--branch", request.branch])
-    if request.repo:
-        command.extend(["--repo", request.repo])
-    if request.remote_url:
-        command.extend(["--remote-url", request.remote_url])
-    if request.host:
-        command.extend(["--host", request.host])
-    if request.allow_dirty:
-        command.append("--allow-dirty")
-
-    completed = run_command(command, cwd=repo_dir)
-    return {
-        "mode": "repo_dir",
-        "repo_dir": str(repo_dir),
-        "key_name": request.key_name,
-        "stdout": completed.stdout.strip(),
-        "stderr": completed.stderr.strip(),
-    }
-
-
 def push_uploaded_files(request: PushRequest, key_path: Path) -> dict[str, object]:
-    if request.files is None:
-        raise HTTPException(status_code=400, detail="files are required for content push mode")
-
     remote_url = build_remote_url(request)
     branch = resolve_branch(request)
     author_name = resolve_author_name(request)
     author_email = resolve_author_email(request)
+    remote_name = "origin"
 
     with tempfile.TemporaryDirectory(dir=STAGING_ROOT) as temp_dir:
         repo_dir = Path(temp_dir)
         prepare_uploaded_repo(
             repo_dir=repo_dir,
-            remote_name=request.remote,
+            remote_name=remote_name,
             remote_url=remote_url,
             branch=branch,
             key_path=key_path,
@@ -544,13 +489,13 @@ def push_uploaded_files(request: PushRequest, key_path: Path) -> dict[str, objec
         command = ["git", "push"]
         if request.force_push:
             command.append("--force-with-lease")
-        command.extend([request.remote, branch])
+        command.extend([remote_name, branch])
         completed = run_command(command, cwd=repo_dir)
         commit = current_commit(repo_dir)
 
     return {
         "mode": "files",
-        "remote": request.remote,
+        "remote": remote_name,
         "remote_url": remote_url,
         "branch": branch,
         "key_name": request.key_name,
@@ -591,9 +536,6 @@ def import_key(request: SaveKeyRequest) -> dict[str, str]:
 def push_git(request: PushRequest) -> dict[str, object]:
     try:
         key_path = ensure_key_ready(request)
-        mode = resolve_push_mode(request)
-        if mode == "repo_dir":
-            return push_existing_repo(request, key_path)
         return push_uploaded_files(request, key_path)
     except CommandError as exc:
         raise command_failure(exc) from exc

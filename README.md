@@ -2,7 +2,7 @@
 
 一个通过 API 执行 Git SSH 推送的服务。
 
-推荐用法是把私钥和仓库内容都传给 API，由容器内部完成暂存、提交和推送；不需要把待推送仓库挂载到宿主机目录再进入容器执行。
+服务现在只保留一种推送方式：把私钥和仓库内容都传给 API，由容器内部创建临时仓库、提交并推送。它不再支持传入 `repo_dir` 推送容器内已有仓库。
 
 ## 启动 API
 
@@ -22,6 +22,12 @@ GIT_API_PORT=18000 docker compose up --build -d
 
 ```text
 ./data/keys/default.key
+```
+
+服务内部会把临时仓库放到：
+
+```text
+./data/staging/
 ```
 
 ### 启动时通过容器环境变量导入 key
@@ -68,7 +74,7 @@ curl -X POST http://127.0.0.1:8000/keys/import \
 
 ### 2. 直接把内容传给 API 并推送
 
-`/git/push` 现在支持直接接收文件内容。服务会在容器内创建临时仓库，拉取远端分支（如果存在），覆盖写入你传入的文件，提交后再推送。
+`/git/push` 只接受文件内容模式。服务会在容器内创建临时仓库，拉取远端分支（如果存在），覆盖写入你传入的文件，提交后再推送。
 
 ```bash
 curl -X POST http://127.0.0.1:8000/git/push \
@@ -106,23 +112,6 @@ curl -X POST http://127.0.0.1:8000/git/push \
 
 如果你想一次请求里同时带私钥，也可以直接在 `/git/push` 的请求体中加入 `private_key`。服务会先把私钥写到 `data/keys/<key_name>.key`，再执行推送。
 
-### 3. 兼容旧模式：推送已存在仓库
-
-如果你仍然想推送一个已经存在于容器工作目录内的仓库，`/git/push` 仍然支持 `repo_dir` 模式：
-
-```bash
-curl -X POST http://127.0.0.1:8000/git/push \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "repo_dir": "my-repo",
-    "key_name": "default",
-    "host": "github.com",
-    "repo": "owner/repo"
-  }'
-```
-
-这个模式下需要传 `repo_dir`，且不能和 `files` 同时出现。
-
 ## 健康检查
 
 ```bash
@@ -132,5 +121,6 @@ curl http://127.0.0.1:8000/health
 ## 注意
 
 - 推荐通过 API 传文件内容，不要把真实私钥提交到代码仓库。
+- `/git/push` 现在只支持 `files` 模式。
 - `keys/import` 只保存你提供的现有私钥，不会生成新的私钥。
 - 私钥只会写到挂载目录 `data/keys/`。

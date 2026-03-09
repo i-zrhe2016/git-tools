@@ -8,7 +8,6 @@ services:
     environment:
       GIT_API_DATA_DIR: /app/data
       GIT_API_HOME: /app/data/home
-      GIT_API_WORKSPACE_ROOT: /workspace
       GIT_API_DEFAULT_KEY_NAME: default
       GIT_API_INIT_KEY_NAME: ${GIT_API_INIT_KEY_NAME:-default}
       GIT_API_INIT_HOST: ${GIT_API_INIT_HOST:-github.com}
@@ -19,5 +18,4 @@ services:
       GIT_API_INIT_PRIVATE_KEY_B64: ${GIT_API_INIT_PRIVATE_KEY_B64:-}
     volumes:
       - ./data:/app/data
-      - ./workspace:/workspace
     restart: unless-stopped

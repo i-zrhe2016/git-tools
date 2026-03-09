@@ -4,7 +4,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     GIT_API_DATA_DIR=/app/data \
     GIT_API_HOME=/app/data/home \
-    GIT_API_WORKSPACE_ROOT=/workspace \
     GIT_API_DEFAULT_KEY_NAME=default
 
 RUN apt-get update \
@@ -17,10 +16,10 @@ COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
 COPY app ./app
-COPY setup_git_ssh.sh push_git.sh README.md ./
+COPY setup_git_ssh.sh README.md ./
 
-RUN chmod +x /app/setup_git_ssh.sh /app/push_git.sh \
-    && mkdir -p /app/data/keys /app/data/home /workspace
+RUN chmod +x /app/setup_git_ssh.sh \
+    && mkdir -p /app/data/keys /app/data/home
 
 EXPOSE 8000
 
