@@ -4,12 +4,5 @@ __pycache__/
 key
 .env
 .venv/
-
-data/*
-!data/.gitkeep
-!data/keys/
-data/keys/*
-!data/keys/.gitkeep
-
-workspace/*
-!workspace/.gitkeep
+data/
+workspace/

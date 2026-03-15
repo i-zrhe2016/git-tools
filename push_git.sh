@@ -188,7 +188,7 @@ else
 fi
 
 if [[ "${ALLOW_DIRTY}" -ne 1 ]] && [[ -n "$(git status --porcelain)" ]]; then
-  echo "Working tree has uncommitted changes. Commit first, or rerun with --allow-dirty." >&2
+  echo "Working tree has uncommitted changes. Run ./submit_git.sh or ./commit_git.sh first, or rerun with --allow-dirty." >&2
   exit 1
 fi
 
