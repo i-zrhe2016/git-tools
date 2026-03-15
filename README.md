@@ -6,6 +6,12 @@
 
 ## 启动 API
 
+先设置一个访问 token；默认开启认证，未设置 token 时服务会拒绝启动：
+
+```bash
+export GIT_API_AUTH_TOKEN="$(openssl rand -hex 32)"
+```
+
 ```bash
 docker compose up --build -d
 ```
@@ -22,6 +28,19 @@ GIT_API_PORT=18000 docker compose up --build -d
 
 ```text
 ./data/keys/default.key
+```
+
+默认只有 `/health` 允许匿名访问，其余接口都需要认证。请求时任选一种方式传 token：
+
+```text
+Authorization: Bearer <your-token>
+X-API-Key: <your-token>
+```
+
+如果你只在受信任的内网临时使用，也可以显式关闭认证：
+
+```bash
+export GIT_API_AUTH_REQUIRED=false
 ```
 
 ### 启动时通过容器环境变量导入 key
@@ -56,6 +75,7 @@ docker compose up --build -d
 ```bash
 curl -X POST http://127.0.0.1:8000/keys/import \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $GIT_API_AUTH_TOKEN" \
   -d '{
     "key_name": "default",
     "host": "github.com",
@@ -73,6 +93,7 @@ curl -X POST http://127.0.0.1:8000/keys/import \
 ```bash
 curl -X POST http://127.0.0.1:8000/git/push \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $GIT_API_AUTH_TOKEN" \
   -d '{
     "key_name": "default",
     "host": "github.com",
@@ -113,6 +134,7 @@ curl -X POST http://127.0.0.1:8000/git/push \
 ```bash
 curl -X POST http://127.0.0.1:8000/git/push \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $GIT_API_AUTH_TOKEN" \
   -d '{
     "repo_dir": "my-repo",
     "key_name": "default",

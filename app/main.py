@@ -4,6 +4,7 @@ import base64
 import binascii
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -11,7 +12,8 @@ import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 
@@ -28,10 +30,15 @@ DEFAULT_AUTHOR_NAME = os.getenv("GIT_API_COMMIT_AUTHOR_NAME", "git-tools api")
 DEFAULT_AUTHOR_EMAIL = os.getenv(
     "GIT_API_COMMIT_AUTHOR_EMAIL", "git-tools-api@example.invalid"
 )
+AUTH_REQUIRED_ENV = "GIT_API_AUTH_REQUIRED"
+AUTH_TOKEN_ENV = "GIT_API_AUTH_TOKEN"
 KEY_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 REMOTE_HTTPS_RE = re.compile(r"^https?://([^/]+)/(.+)$")
 REMOTE_SSH_URL_RE = re.compile(r"^ssh://([^@]+)@([^/]+)/(.+)$")
 REMOTE_SCP_RE = re.compile(r"^([^@]+)@([^:]+):(.+)$")
+TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
+PUBLIC_PATHS = frozenset({"/health"})
 
 SETUP_SCRIPT = ROOT_DIR / "setup_git_ssh.sh"
 PUSH_SCRIPT = ROOT_DIR / "push_git.sh"
@@ -83,6 +90,7 @@ class CommandError(RuntimeError):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    validate_auth_configuration()
     KEYS_DIR.mkdir(parents=True, exist_ok=True)
     SSH_HOME.mkdir(parents=True, exist_ok=True)
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -92,6 +100,41 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="git-tools API", version="1.0.0", lifespan=lifespan)
+
+
+def getenv_nonempty(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def parse_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in TRUE_VALUES:
+        return True
+    if normalized in FALSE_VALUES:
+        return False
+    raise RuntimeError(
+        f"{name} must be one of: {', '.join(sorted(TRUE_VALUES | FALSE_VALUES))}"
+    )
+
+
+def auth_required() -> bool:
+    return parse_bool_env(AUTH_REQUIRED_ENV, default=True)
+
+
+def configured_auth_token() -> str | None:
+    return getenv_nonempty(AUTH_TOKEN_ENV)
+
+
+def validate_auth_configuration() -> None:
+    if auth_required() and not configured_auth_token():
+        raise RuntimeError(f"{AUTH_TOKEN_ENV} must be set when {AUTH_REQUIRED_ENV}=true")
 
 
 def command_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
@@ -198,14 +241,6 @@ def write_private_key(key_path: Path, private_key: str) -> None:
     os.chmod(public_key_path, 0o644)
 
 
-def getenv_nonempty(name: str) -> str | None:
-    value = os.getenv(name)
-    if value is None:
-        return None
-    stripped = value.strip()
-    return stripped or None
-
-
 def normalize_private_key_env(private_key: str) -> str:
     return private_key.replace("\\r\\n", "\n").replace("\\n", "\n")
 
@@ -254,6 +289,50 @@ def bootstrap_key_from_env() -> None:
     except CommandError as exc:
         error = exc.stderr.strip() or exc.stdout.strip() or "command failed"
         raise RuntimeError(f"failed to bootstrap private key from {source}: {error}") from exc
+
+
+def extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    stripped = token.strip()
+    return stripped or None
+
+
+def request_api_token(request: Request) -> str | None:
+    bearer = extract_bearer_token(request.headers.get("Authorization"))
+    if bearer:
+        return bearer
+    api_key = request.headers.get("X-API-Key")
+    if api_key is None:
+        return None
+    stripped = api_key.strip()
+    return stripped or None
+
+
+@app.middleware("http")
+async def require_api_auth(request: Request, call_next):
+    if request.url.path in PUBLIC_PATHS or not auth_required():
+        return await call_next(request)
+
+    expected_token = configured_auth_token()
+    if not expected_token:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"{AUTH_TOKEN_ENV} is not configured"},
+        )
+
+    provided_token = request_api_token(request)
+    if not provided_token or not secrets.compare_digest(provided_token, expected_token):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "missing or invalid api token"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await call_next(request)
 
 
 def command_failure(exc: CommandError) -> HTTPException:
